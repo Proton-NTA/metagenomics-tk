@@ -71,12 +71,12 @@ process pMMseqs2 {
       tuple val("${sample}_${binType}"), val("${output}"), val(params.LOG_LEVELS.INFO), file(".command.sh"), \
         file(".command.out"), file(".command.err"), file(".command.log"), emit: logs
 
-   shell:
+   script:
    output = getOutput("${sample}", params.runid, "mmseqs2/${dbType}", "")
    S3_DB_ACCESS=params.steps?.annotation?.mmseqs2?."${dbType}"?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_${dbType}_ACCESS" : ""
    S3_DB_SECRET=params.steps?.annotation?.mmseqs2?."${dbType}"?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_${dbType}_SECRET" : ""
    ADDITIONAL_COLUMNS = "${columns}".trim() == "" ? "" : ",${columns}"
-   template("mmseqs2.sh")
+   template "mmseqs2.sh"
 }
 
 /**
@@ -125,7 +125,7 @@ process pMMseqs2_taxonomy {
         file(".command.out"), file(".command.err"), file(".command.log"), emit: logs
 
 
-   shell:
+   script:
    output = getOutput("${sample}", params.runid, "mmseqs2_taxonomy/${dbType}", "")
    // The maximum possible sensitivity is reduced each time the process is retried.
    // The reason for this behaviour is a bug that occurs at higher sensitivity levels.
@@ -133,7 +133,7 @@ process pMMseqs2_taxonomy {
    S3_TAX_DB_SECRET=params.steps?.annotation?.mmseqs2_taxonomy?."${dbType}"?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_TAX_${dbType}_SECRET" : ""
    sensitivityRaw = initialMaxSensitivity - task.attempt + 1
    sensitivity = sensitivityRaw < 1 ? 1 : sensitivityRaw
-   template("mmseqs2Taxonomy.sh")
+   template "mmseqs2Taxonomy.sh"
 }
 
 process pResistanceGeneIdentifier {
@@ -164,7 +164,7 @@ process pResistanceGeneIdentifier {
       tuple val("${binID}"), val("${output}"), val(params.LOG_LEVELS.INFO), file(".command.sh"), \
         file(".command.out"), file(".command.err"), file(".command.log"), emit: logs
 
-   shell:
+   script:
    output = getOutput("${sample}", params.runid, "rgi", "")
    EXTRACTED_DB=params.steps?.annotation?.rgi?.database?.extractedDBPath ?: ""
    DOWNLOAD_LINK=params.steps?.annotation?.rgi?.database?.download?.source ?: ""
@@ -172,74 +172,74 @@ process pResistanceGeneIdentifier {
    S5CMD_PARAMS=params.steps?.annotation?.rgi?.database?.download?.s5cmd?.params ?: ""
    S3_rgi_ACCESS=params.steps?.annotation?.rgi?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_rgi_ACCESS" : ""
    S3_rgi_SECRET=params.steps?.annotation?.rgi?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_rgi_SECRET" : ""
-   '''
-   ADDITIONAL_RGI_PARAMS="!{params.steps?.annotation?.rgi?.additionalParams}"
+   """
+   ADDITIONAL_RGI_PARAMS="${params.steps?.annotation?.rgi?.additionalParams}"
 
    # Check developer documentation
    CARD_JSON=""
-   if [ -z "!{EXTRACTED_DB}" ] 
+   if [ -z "${EXTRACTED_DB}" ] 
    then
-        DATABASE=!{params.polished.databases}/rgi
-        LOCK_FILE=${DATABASE}/lock.txt
+        DATABASE=${params.polished.databases}/rgi
+        LOCK_FILE=\${DATABASE}/lock.txt
 
 	# Check if access and secret keys are necessary for s5cmd
-        if [ ! -z "!{S3_rgi_ACCESS}" ]
+        if [ ! -z "${S3_rgi_ACCESS}" ]
         then
-          export AWS_ACCESS_KEY_ID=!{S3_rgi_ACCESS}
-          export AWS_SECRET_ACCESS_KEY=!{S3_rgi_SECRET}
+          export AWS_ACCESS_KEY_ID=${S3_rgi_ACCESS}
+          export AWS_SECRET_ACCESS_KEY=${S3_rgi_SECRET}
         fi
 
         # Download CARD database
-        mkdir -p ${DATABASE}
-        flock ${LOCK_FILE} concurrentDownload.sh --output=${DATABASE} \
-         --link=!{DOWNLOAD_LINK} \
-         --httpsCommand="wgetStatic --no-check-certificate -qO- !{DOWNLOAD_LINK} | tar -xvj " \
-         --s3DirectoryCommand="s5cmd !{S5CMD_PARAMS} cp --concurrency !{task.cpus}  !{DOWNLOAD_LINK} . " \
-         --s3FileCommand="s5cmd !{S5CMD_PARAMS} cat --concurrency !{task.cpus} !{DOWNLOAD_LINK} | tar -xvj " \
-	 --s5cmdAdditionalParams="!{S5CMD_PARAMS}" \
-         --localCommand="tar -xvjf !{DOWNLOAD_LINK}" \
-         --expectedMD5SUM=!{MD5SUM}
+        mkdir -p \${DATABASE}
+        flock \${LOCK_FILE} concurrentDownload.sh --output=\${DATABASE} \
+         --link=${DOWNLOAD_LINK} \
+         --httpsCommand="wgetStatic --no-check-certificate -qO- ${DOWNLOAD_LINK} | tar -xvj " \
+         --s3DirectoryCommand="s5cmd ${S5CMD_PARAMS} cp --concurrency ${task.cpus}  ${DOWNLOAD_LINK} . " \
+         --s3FileCommand="s5cmd ${S5CMD_PARAMS} cat --concurrency ${task.cpus} ${DOWNLOAD_LINK} | tar -xvj " \
+	 --s5cmdAdditionalParams="${S5CMD_PARAMS}" \
+         --localCommand="tar -xvjf ${DOWNLOAD_LINK}" \
+         --expectedMD5SUM=${MD5SUM}
 
-         CARD_JSON="$(readlink -f ${DATABASE}/out/card.json)"
+         CARD_JSON="\$(readlink -f \${DATABASE}/out/card.json)"
    else
-         CARD_JSON="!{EXTRACTED_DB}"
+         CARD_JSON="${EXTRACTED_DB}"
    fi
 
    # gunzip (if required) and strip '*' sign from amino acid files
-   zcat -f !{fasta} | sed 's/*//g' > input.faa
+   zcat -f ${fasta} | sed 's/*//g' > input.faa
 
    mkdir output
-   OUTPUT_ID=!{binID}.rgi
-   RGI_OUTPUT=output/${OUTPUT_ID}
+   OUTPUT_ID=${binID}.rgi
+   RGI_OUTPUT=output/\${OUTPUT_ID}
    # load CARD database and run rgi
-   rgi load --card_json ${CARD_JSON} --local
+   rgi load --card_json \${CARD_JSON} --local
    rgi main --input_sequence input.faa \
-               --output_file ${RGI_OUTPUT} --input_type protein --local \
-               --alignment_tool DIAMOND --num_threads !{task.cpus} --clean ${ADDITIONAL_RGI_PARAMS}
+               --output_file \${RGI_OUTPUT} --input_type protein --local \
+               --alignment_tool DIAMOND --num_threads ${task.cpus} --clean \${ADDITIONAL_RGI_PARAMS}
 
    # Fix for ownership issue https://github.com/nextflow-io/nextflow/issues/4565
    chmod a+rw -R output
    chmod a+rw -R localDB
 
-   RGI_OUT_TMP=!{binID}.rgi.tmp.tsv
-   RGI_OUT=!{binID}.rgi.tsv
+   RGI_OUT_TMP=${binID}.rgi.tmp.tsv
+   RGI_OUT=${binID}.rgi.tsv
    # Produce files only if there is an actual output
-   if [ $(tail -n +2 ${RGI_OUTPUT}.txt | wc -l) -gt 0 ]; then 
+   if [ \$(tail -n +2 \${RGI_OUTPUT}.txt | wc -l) -gt 0 ]; then 
 
      #  add sample and binid information to rgi output
-     sed  '1 s/^/SAMPLE\tBIN_ID\t/g' ${RGI_OUTPUT}.txt  \
-	| sed "2,$ s/^/!{sample}\t!{binID}\t/g" > ${RGI_OUT_TMP}
+     sed  '1 s/^/SAMPLE\tBIN_ID\t/g' \${RGI_OUTPUT}.txt  \
+	| sed "2,\$ s/^/${sample}\t${binID}\t/g" > \${RGI_OUT_TMP}
 
      # ORF_ID generated by rgi contains ORF names with whitespaces (e.g.: "POGDFCMJ_00141 Methionyl-tRNA formyltransferase")
      # The following lines shortens the ID (e.g.: POGDFCMJ_00141)
-     paste -d$"\t" <(cut -f 3 ${RGI_OUT_TMP} | cut -d ' ' -f 1) ${RGI_OUT_TMP} \
-	| sed '1 s/ORF_ID/ORF_SHORT_ID/' > ${RGI_OUT}
+     paste -d\$"\t" <(cut -f 3 \${RGI_OUT_TMP} | cut -d ' ' -f 1) \${RGI_OUT_TMP} \
+	| sed '1 s/ORF_ID/ORF_SHORT_ID/' > \${RGI_OUT}
 
      # RGI Heatmap fails because of the following error: https://github.com/arpcard/rgi/issues/188
-     trap 'if [ "$?" == 1 ] && ( grep -q "ValueError: zero-size array to reduction operation fmin which has no identity" stderr.log ); then echo "Heatmap could not be produced"; exit 0; fi' EXIT
-     rgi heatmap --input output --output ${OUTPUT_ID} 2> >(tee -a stderr.log >&2)
+     trap 'if [ "\$?" == 1 ] && ( grep -q "ValueError: zero-size array to reduction operation fmin which has no identity" stderr.log ); then echo "Heatmap could not be produced"; exit 0; fi' EXIT
+     rgi heatmap --input output --output \${OUTPUT_ID} 2> >(tee -a stderr.log >&2)
    fi
-   '''
+   """
 }
 
 /**
@@ -270,10 +270,10 @@ process pProdigal {
       tuple val("${sample}"), file("${sample}.prodigal.ffn"), emit: prodigal_ffn
       tuple file(".command.sh"), file(".command.out"), file(".command.err"), file(".command.log")
 
-   shell:
-   '''
-   zcat !{contigs} | prodigal !{params.steps?.binning?.magscot?.prodigal?.additionalParams} -a !{sample}.prodigal.faa -d !{sample}.prodigal.ffn -o tmpfile
-   '''
+   script:
+   """
+   zcat ${contigs} | prodigal ${params.steps?.binning?.magscot?.prodigal?.additionalParams} -a ${sample}.prodigal.faa -d ${sample}.prodigal.ffn -o tmpfile
+   """
 }
 
 
@@ -315,7 +315,7 @@ process pHmmSearch {
       tuple file(".command.sh"), file(".command.out"), file(".command.err"), file(".command.log")
 
 
-   shell:
+   script:
    output = getOutput("${sample}", params.runid, "hmmSearch", "")
    EXTRACTED_DB=params.steps?.binning?.magscot?.hmmSearch?.database?.extractedDBPath ?: ""
    DOWNLOAD_LINK=params.steps?.binning?.magscot?.hmmSearch?.database?.download?.source ?: ""
@@ -323,22 +323,22 @@ process pHmmSearch {
    S5CMD_PARAMS=params.steps?.binning?.magscot?.hmmSearch?.database?.download?.s5cmd?.params ?: ""
    S3_gtdb_ACCESS=params.steps?.binning?.magscot?.hmmSearch?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_gtdb_ACCESS" : ""
    S3_gtdb_SECRET=params.steps?.binning?.magscot?.hmmSearch?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_gtdb_SECRET" : ""
-   '''
-   ADDITIONAL_HMMSEARCH_PARAMS="!{params.steps?.binning?.magscot?.hmmSearch?.additionalParams}"
+   """
+   ADDITIONAL_HMMSEARCH_PARAMS="${params.steps?.binning?.magscot?.hmmSearch?.additionalParams}"
 
-   gtdb_download.sh "!{EXTRACTED_DB}" "!{DOWNLOAD_LINK}" "!{S5CMD_PARAMS}" "!{task.cpus}" "!{params.polished.databases}" "!{MD5SUM}" "!{S3_gtdb_ACCESS}" "!{S3_gtdb_SECRET}" || exit 1 
+   gtdb_download.sh "${EXTRACTED_DB}" "${DOWNLOAD_LINK}" "${S5CMD_PARAMS}" "${task.cpus}" "${params.polished.databases}" "${MD5SUM}" "${S3_gtdb_ACCESS}" "${S3_gtdb_SECRET}" || exit 1 
 
-   GTDB=$(cat gtdbPath.txt)
+   GTDB=\$(cat gtdbPath.txt)
 
    # Run hmmsearch
-   hmmsearch --cpu !{task.cpus} ${ADDITIONAL_HMMSEARCH_PARAMS} -o !{sample}.hmm.tigr.out --tblout !{sample}.hmm.tigr.hit.tsv ${GTDB}/markers/tigrfam/tigrfam.hmm !{faaFile}
-   hmmsearch --cpu !{task.cpus} ${ADDITIONAL_HMMSEARCH_PARAMS} -o !{sample}.hmm.pfam.out --tblout !{sample}.hmm.pfam.hit.tsv ${GTDB}/markers/pfam/Pfam-A.hmm !{faaFile}
+   hmmsearch --cpu ${task.cpus} \${ADDITIONAL_HMMSEARCH_PARAMS} -o ${sample}.hmm.tigr.out --tblout ${sample}.hmm.tigr.hit.tsv \${GTDB}/markers/tigrfam/tigrfam.hmm ${faaFile}
+   hmmsearch --cpu ${task.cpus} \${ADDITIONAL_HMMSEARCH_PARAMS} -o ${sample}.hmm.pfam.out --tblout ${sample}.hmm.pfam.hit.tsv \${GTDB}/markers/pfam/Pfam-A.hmm ${faaFile}
 
    # Remove header and create all-hits file
-   cat !{sample}.hmm.tigr.hit.tsv | grep -v "^#" | awk '{print $1"\t"$3"\t"$5}' > !{sample}.tigr
-   cat !{sample}.hmm.pfam.hit.tsv | grep -v "^#" | awk '{print $1"\t"$4"\t"$5}' > !{sample}.pfam
-   cat !{sample}.tigr !{sample}.pfam > !{sample}.hmm.allhits.tsv
-   '''
+   cat ${sample}.hmm.tigr.hit.tsv | grep -v "^#" | awk '{print \$1"\t"\$3"\t"\$5}' > ${sample}.tigr
+   cat ${sample}.hmm.pfam.hit.tsv | grep -v "^#" | awk '{print \$1"\t"\$4"\t"\$5}' > ${sample}.pfam
+   cat ${sample}.tigr ${sample}.pfam > ${sample}.hmm.allhits.tsv
+   """
 
 
 }
@@ -382,7 +382,7 @@ process pKEGGFromMMseqs2 {
       tuple val("${sample}_${binType}"), val("${output}"), val(params.LOG_LEVELS.INFO), file(".command.sh"), \
         file(".command.out"), file(".command.err"), file(".command.log"), emit: logs
 
-   shell:
+   script:
       output = getOutput("${sample}", params.runid, "keggFromMMseqs2", "")
       DOWNLOAD_LINK=params.steps?.annotation?.keggFromMMseqs2?.database?.download?.source ?: ""
       MD5SUM=params?.steps?.annotation?.keggFromMMseqs2?.database?.download?.md5sum ?: ""
@@ -390,38 +390,38 @@ process pKEGGFromMMseqs2 {
       EXTRACTED_DB=params.steps?.annotation?.keggFromMMseqs2?.database?.extractedDBPath ?: ""
       S3_KEGG_ACCESS=params.steps?.annotation?.keggFromMMseqs2?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_kegg_ACCESS" : ""
       S3_KEGG_SECRET=params.steps?.annotation?.keggFromMMseqs2?.database?.download?.s5cmd && S5CMD_PARAMS.indexOf("--no-sign-request") == -1 ? "\$S3_kegg_SECRET" : ""
-      '''
+      """
       # Check developer documentation
       KEGG_DB=""
-      if [[ -z "!{EXTRACTED_DB}" ]] 
+      if [[ -z "${EXTRACTED_DB}" ]] 
       then
-        DATABASE=!{params.polished.databases}/kegg
-        LOCK_FILE=${DATABASE}/lock.txt
+        DATABASE=${params.polished.databases}/kegg
+        LOCK_FILE=\${DATABASE}/lock.txt
 
 	# Check if access and secret keys are necessary for s5cmd
-        if [ ! -z "!{S3_KEGG_ACCESS}" ]
+        if [ ! -z "${S3_KEGG_ACCESS}" ]
         then
-          export AWS_ACCESS_KEY_ID=!{S3_KEGG_ACCESS}
-          export AWS_SECRET_ACCESS_KEY=!{S3_KEGG_SECRET}
+          export AWS_ACCESS_KEY_ID=${S3_KEGG_ACCESS}
+          export AWS_SECRET_ACCESS_KEY=${S3_KEGG_SECRET}
         fi
 
         # Download KEGG database
-        mkdir -p ${DATABASE}
-        flock ${LOCK_FILE} concurrentDownload.sh --output=${DATABASE} \
-         --link=!{DOWNLOAD_LINK} \
-         --httpsCommand="wgetStatic --no-check-certificate -qO- !{DOWNLOAD_LINK} | tar -xz " \
-         --s3DirectoryCommand="s5cmd !{S5CMD_PARAMS} cp --concurrency !{task.cpus} !{DOWNLOAD_LINK} . " \
-         --s3FileCommand="s5cmd !{S5CMD_PARAMS} cat !{DOWNLOAD_LINK} | tar -xz " \
-	 --s5cmdAdditionalParams="!{S5CMD_PARAMS}" \
-         --localCommand="tar -xzvf !{DOWNLOAD_LINK} " \
-         --expectedMD5SUM=!{MD5SUM}
+        mkdir -p \${DATABASE}
+        flock \${LOCK_FILE} concurrentDownload.sh --output=\${DATABASE} \
+         --link=${DOWNLOAD_LINK} \
+         --httpsCommand="wgetStatic --no-check-certificate -qO- ${DOWNLOAD_LINK} | tar -xz " \
+         --s3DirectoryCommand="s5cmd ${S5CMD_PARAMS} cp --concurrency ${task.cpus} ${DOWNLOAD_LINK} . " \
+         --s3FileCommand="s5cmd ${S5CMD_PARAMS} cat ${DOWNLOAD_LINK} | tar -xz " \
+	 --s5cmdAdditionalParams="${S5CMD_PARAMS}" \
+         --localCommand="tar -xzvf ${DOWNLOAD_LINK} " \
+         --expectedMD5SUM=${MD5SUM}
 
-         KEGG_DB="${DATABASE}/out/"
+         KEGG_DB="\${DATABASE}/out/"
       else
-         KEGG_DB="!{EXTRACTED_DB}"
+         KEGG_DB="${EXTRACTED_DB}"
       fi
-      blast2kegg.py !{blastResult} ${KEGG_DB} !{blastResult.baseName}.keggPaths.tsv
-      '''
+      blast2kegg.py ${blastResult} \${KEGG_DB} ${blastResult.baseName}.keggPaths.tsv
+      """
 }
 
 
@@ -535,7 +535,7 @@ process pProkka {
       tuple val("${binID}"), val("${output}"), val(params.LOG_LEVELS.INFO), file(".command.sh"), \
         file(".command.out"), file(".command.err"), file(".command.log"), emit: logs
 
-    shell:
+    script:
       output = getOutput("${sample}", params.runid, "prokka", "")
       prodigalModeStr = getProdigalModeString(prodigalMode)
       prokkaDomain = domain ? " --kingdom " + domain : ""
@@ -575,7 +575,7 @@ process pWhokaryote {
       tuple val("${binID}"), val("${output}"), val(params.LOG_LEVELS.INFO), file(".command.sh"), \
         file(".command.out"), file(".command.err"), file(".command.log"), emit: logs
 
-    shell:
+    script:
       output = getOutput("${sample}", params.runid, "whokaryote", "")
       template "whokaryote.sh"
 }
@@ -668,10 +668,10 @@ process pCount {
     output:
     tuple val("${sample}"), val("${binID}"), path(fasta), path(metadata), env(COUNT) 
 
-    shell:
-    '''
-    COUNT=$(seqkit stats -T <(cat !{fasta}) | cut -d$'\t' -f 4 | tail -n 1)
-    '''
+    script:
+    """
+    COUNT=\$(seqkit stats -T <(cat ${fasta}) | cut -d\$'\t' -f 4 | tail -n 1)
+    """
 }
 
 /**
@@ -699,8 +699,8 @@ process pCollectFile {
     output:
     tuple val("${sample}"), val("${type}"), val("${dbType}"), path("*.blast.tsv", arity: "1..*")
 
-    shell:
-    '''
+    script:
+    """
     mkdir tmp
 
     # Concatenate all chunks
@@ -709,8 +709,8 @@ process pCollectFile {
     # Create for every bin a seperate file in parallel  
     csvtk cut -t -T  -f BIN_ID tmp/concat.tsv \
 	| tail -n +2 | sort | uniq \
-	| xargs -P !{task.cpus} -I {} bash filterBin.sh {} "!{sample}_!{type}.!{dbType}.blast.tsv" 
-    '''
+	| xargs -P ${task.cpus} -I {} bash filterBin.sh {} "${sample}_${type}.${dbType}.blast.tsv" 
+    """
 }
 
 
